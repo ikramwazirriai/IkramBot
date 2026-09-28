@@ -1,10 +1,6 @@
 import re
 
 
-# --------------------------------------------------
-# IKRAM IDENTIFIERS
-# --------------------------------------------------
-
 IKRAM_NAMES = [
     "ikram",
     "ikram ullah",
@@ -14,119 +10,64 @@ IKRAM_NAMES = [
 ]
 
 
-# --------------------------------------------------
-# PRONOUN / FOLLOW-UP REFERENCES
-# --------------------------------------------------
-
-IKRAM_CONTEXT_WORDS = [
-    "his",
-    "him",
-    "he",
-    "he's",
-    "himself",
-    "ikram's",
-    "ikram’s",
-    "the person",
-    "this person"
-]
-
-
-# --------------------------------------------------
-# CHECK FOR IKRAM NAME
-# --------------------------------------------------
-
 def contains_ikram_name(text):
-
     text = text.lower()
 
     for name in IKRAM_NAMES:
-
         if name in text:
             return True
 
     return False
 
 
-# --------------------------------------------------
-# CHECK FOR IKRAM REFERENCE
-# --------------------------------------------------
+def is_clearly_unrelated(question):
+    """
+    Detect questions that are clearly about another person
+    or an unrelated general topic.
+    """
 
-def contains_ikram_reference(text):
+    question = question.lower().strip()
 
-    text = text.lower()
+    unrelated_patterns = [
+        r"\btell me about elon musk\b",
+        r"\bwho is elon musk\b",
+        r"\btell me about bill gates\b",
+        r"\bwho is bill gates\b",
+        r"\btell me about donald trump\b",
+        r"\bwho is donald trump\b",
+        r"\bwhat is the capital of\b",
+        r"\bsolve this math\b",
+        r"\bwhat is machine learning\b",
+        r"\bwhat is artificial intelligence\b",
+        r"\bwhat is python\b"
+    ]
 
-    for word in IKRAM_CONTEXT_WORDS:
-
-        pattern = rf"\b{re.escape(word)}\b"
-
-        if re.search(pattern, text):
+    for pattern in unrelated_patterns:
+        if re.search(pattern, question):
             return True
 
     return False
 
 
-# --------------------------------------------------
-# CONVERT HISTORY TO TEXT
-# --------------------------------------------------
-
-def history_to_text(conversation_history):
-
-    if not conversation_history:
-        return ""
-
-    history_parts = []
-
-    for message in conversation_history:
-
-        # Streamlit / RAG history format
-        if isinstance(message, dict):
-
-            content = message.get("content", "")
-
-            if content:
-                history_parts.append(str(content))
-
-        # Also support normal strings
-        else:
-
-            history_parts.append(str(message))
-
-    return " ".join(history_parts).lower()
-
-
-# --------------------------------------------------
-# CHECK WHETHER QUESTION IS ABOUT IKRAM
-# --------------------------------------------------
-
 def is_ikram_question(question, conversation_history=None):
 
-    # Directly mentions Ikram
+    # Direct Ikram reference
     if contains_ikram_name(question):
         return True
 
-    # Follow-up question
-    if conversation_history:
+    # Clearly unrelated question
+    if is_clearly_unrelated(question):
+        return False
 
-        if contains_ikram_reference(question):
+    # If it is not clearly unrelated, allow it to reach RAG.
+    #
+    # This is important because Ikrambot has only one
+    # knowledge domain: Ikram Ullah.
+    return True
 
-            previous_text = history_to_text(
-                conversation_history
-            )
-
-            if contains_ikram_name(previous_text):
-                return True
-
-    return False
-
-
-# --------------------------------------------------
-# OUT-OF-SCOPE MESSAGE
-# --------------------------------------------------
 
 def get_rejection_message():
-
     return (
-        "I don't know about that. "
         "I can only answer questions about Ikram Ullah. "
-        "Please ask me something about Ikram Ullah."
+        "Please ask me something related to Ikram Ullah."
     )

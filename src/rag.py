@@ -52,6 +52,61 @@ class IkrambotRAG:
 
         print("Ikrambot RAG system ready.")
 
+    # --------------------------------------------------
+    # PREPARE RETRIEVAL QUERY
+    # --------------------------------------------------
+
+    def prepare_retrieval_query(
+        self,
+        question,
+        history=None
+    ):
+        """
+        Improve short or pronoun-based questions
+        before sending them to the embedding model.
+
+        Example:
+
+            Original:
+            "Where does he study?"
+
+            Retrieval query:
+            "Ikram Ullah Where does he study?"
+
+        The original question is still sent to Gemini.
+        """
+
+        question_lower = question.lower().strip()
+
+        # Pronouns that may refer to Ikram
+        pronouns = [
+            "he",
+            "him",
+            "his",
+            "himself"
+        ]
+
+        words = question_lower.split()
+
+        # Check whether the question contains
+        # a personal pronoun
+        has_pronoun = any(
+            word in words
+            for word in pronouns
+        )
+
+        # If a pronoun is present and Ikram is not
+        # explicitly mentioned, add Ikram Ullah
+        # to improve semantic retrieval.
+        if (
+            has_pronoun
+            and "ikram" not in question_lower
+        ):
+
+            return f"Ikram Ullah {question}"
+
+        # Otherwise keep the original query
+        return question
 
     # --------------------------------------------------
     # RETRIEVE RELEVANT CHUNKS
@@ -60,30 +115,69 @@ class IkrambotRAG:
     def retrieve(
         self,
         question,
+        history=None,
         top_k=5,
         similarity_threshold=0.25
     ):
+        """
+        Retrieve relevant chunks from FAISS.
+        """
 
-        # Create embedding for user question
-        query_embedding = self.embedding_model.encode(
-            [question],
-            convert_to_numpy=True
+        # ----------------------------------------------
+        # 1. PREPARE BETTER RETRIEVAL QUERY
+        # ----------------------------------------------
+
+        retrieval_query = (
+            self.prepare_retrieval_query(
+                question,
+                history
+            )
         )
 
-        # Normalize embedding
+        print(
+            "Original question:",
+            question
+        )
+
+        print(
+            "Retrieval query:",
+            retrieval_query
+        )
+
+        # ----------------------------------------------
+        # 2. CREATE QUERY EMBEDDING
+        # ----------------------------------------------
+
+        query_embedding = (
+            self.embedding_model.encode(
+                [retrieval_query],
+                convert_to_numpy=True
+            )
+        )
+
+        # ----------------------------------------------
+        # 3. NORMALIZE EMBEDDING
+        # ----------------------------------------------
+
         faiss.normalize_L2(
             query_embedding
         )
 
-        # Search FAISS
+        # ----------------------------------------------
+        # 4. SEARCH FAISS
+        # ----------------------------------------------
+
         scores, indices = self.index.search(
             query_embedding,
             top_k
         )
 
+        # ----------------------------------------------
+        # 5. COLLECT RELEVANT RESULTS
+        # ----------------------------------------------
+
         results = []
 
-        # Process search results
         for score, index_id in zip(
             scores[0],
             indices[0]
@@ -91,7 +185,7 @@ class IkrambotRAG:
 
             score = float(score)
 
-            # Ignore weakly related results
+            # Ignore results below threshold
             if score < similarity_threshold:
                 continue
 
@@ -105,7 +199,6 @@ class IkrambotRAG:
 
         return results
 
-
     # --------------------------------------------------
     # BUILD CONTEXT
     # --------------------------------------------------
@@ -114,6 +207,10 @@ class IkrambotRAG:
         self,
         results
     ):
+        """
+        Combine retrieved chunks into a single
+        context string for Gemini.
+        """
 
         context_parts = []
 
@@ -131,7 +228,6 @@ class IkrambotRAG:
             context_parts
         )
 
-
     # --------------------------------------------------
     # ASK IKRAMBOT
     # --------------------------------------------------
@@ -142,6 +238,25 @@ class IkrambotRAG:
         history=None,
         top_k=5
     ):
+        """
+        Main RAG pipeline:
+
+        Question
+            ↓
+        Guard
+            ↓
+        Query preparation
+            ↓
+        Embedding
+            ↓
+        FAISS retrieval
+            ↓
+        Context
+            ↓
+        Gemini
+            ↓
+        Answer + Sources
+        """
 
         # ----------------------------------------------
         # 1. CHECK QUESTION SCOPE
@@ -157,17 +272,16 @@ class IkrambotRAG:
                 "sources": []
             }
 
-
         # ----------------------------------------------
         # 2. RETRIEVE RELEVANT INFORMATION
         # ----------------------------------------------
 
         results = self.retrieve(
             question,
+            history=history,
             top_k=top_k,
             similarity_threshold=0.25
         )
-
 
         # ----------------------------------------------
         # 3. CHECK WHETHER INFORMATION WAS FOUND
@@ -184,7 +298,6 @@ class IkrambotRAG:
                 "sources": []
             }
 
-
         # ----------------------------------------------
         # 4. BUILD RETRIEVED CONTEXT
         # ----------------------------------------------
@@ -193,9 +306,8 @@ class IkrambotRAG:
             results
         )
 
-
         # ----------------------------------------------
-        # 5. SEND CONTEXT TO GEMINI
+        # 5. SEND CONTEXT + QUESTION TO GEMINI
         # ----------------------------------------------
 
         answer = generate_answer(
@@ -203,7 +315,6 @@ class IkrambotRAG:
             context=context,
             history=history
         )
-
 
         # ----------------------------------------------
         # 6. COLLECT SOURCES
@@ -219,9 +330,8 @@ class IkrambotRAG:
 
                 sources.append(source)
 
-
         # ----------------------------------------------
-        # 7. RETURN RESULT
+        # 7. RETURN FINAL RESULT
         # ----------------------------------------------
 
         return {
