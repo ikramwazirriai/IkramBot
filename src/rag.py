@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import faiss
 import pickle
@@ -17,6 +18,66 @@ INDEX_PATH = PROJECT_DIR / "vectorstore" / "ikram.index"
 METADATA_PATH = PROJECT_DIR / "vectorstore" / "metadata.pkl"
 
 
+QUERY_EXPANSIONS = (
+    (
+        ("study", "studies", "studying", "university", "college", "degree", "education", "attend"),
+        "university education college degree institution Lahore UMT",
+    ),
+    (
+        ("born", "birth", "birthplace"),
+        "birthplace village hometown",
+    ),
+    (
+        ("programming language", "programming languages"),
+        "programming language Python coding",
+    ),
+)
+
+STOP_WORDS = {
+    "a", "about", "after", "all", "an", "and", "are", "as", "at", "be",
+    "been", "before", "being", "but", "by", "can", "could", "did", "do",
+    "does", "for", "from", "he", "her", "him", "his", "how", "i", "in",
+    "is", "it", "me", "of", "on", "or", "she", "tell", "that", "the",
+    "their", "them", "they", "this", "to", "uh", "ullah", "was", "we",
+    "were", "what", "when", "where", "which", "who", "why", "with", "would",
+    "you", "your", "ikram", "know", "knows",
+}
+
+
+def format_source_reference(result):
+    source = result["metadata"]["source"]
+    pages = result["metadata"].get("pages") or sorted(
+        {
+            int(page)
+            for page in re.findall(r"--- Page (\d+) ---", result["text"])
+        }
+    )
+
+    if not pages:
+        return source
+
+    page_label = "page" if len(pages) == 1 else "pages"
+    page_numbers = ", ".join(str(page) for page in pages)
+    return f"{source} ({page_label} {page_numbers})"
+
+
+def get_query_keywords(text):
+    keywords = set()
+
+    for token in re.findall(r"[a-z0-9]+", text.lower()):
+        if token in STOP_WORDS:
+            continue
+        if token.endswith("ies") and len(token) > 4:
+            token = f"{token[:-3]}y"
+        elif token.endswith("ing") and len(token) > 5:
+            token = token[:-3]
+        elif token.endswith("s") and len(token) > 4:
+            token = token[:-1]
+        keywords.add(token)
+
+    return keywords
+
+
 # ==================================================
 # IKRAMBOT RAG CLASS
 # ==================================================
@@ -33,7 +94,7 @@ class IkrambotRAG:
 
         # Load FAISS index
         self.index = faiss.read_index(
-            INDEX_PATH
+            str(INDEX_PATH)
         )
 
         # Load chunks and metadata
@@ -47,6 +108,20 @@ class IkrambotRAG:
         self.chunks = self.data["chunks"]
 
         self.metadata = self.data["metadata"]
+
+        pages_by_source = {}
+        for chunk, metadata in zip(self.chunks, self.metadata):
+            source = metadata["source"]
+            pages = [
+                int(page)
+                for page in re.findall(r"--- Page (\d+) ---", chunk)
+            ]
+            if pages:
+                pages_by_source[source] = pages[-1]
+            inherited_page = pages_by_source.get(source)
+            metadata["pages"] = sorted(
+                set(pages or ([inherited_page] if inherited_page else []))
+            )
 
         # Load embedding model
         self.embedding_model = (
@@ -106,10 +181,16 @@ class IkrambotRAG:
             and "ikram" not in question_lower
         ):
 
-            return f"Ikram Ullah {question}"
+            question = f"Ikram Ullah {question}"
 
-        # Otherwise keep the original query
-        return question
+        query_lower = question.lower()
+        expansions = [
+            expansion
+            for terms, expansion in QUERY_EXPANSIONS
+            if any(term in query_lower for term in terms)
+        ]
+
+        return " ".join([question, *expansions])
 
     # --------------------------------------------------
     # RETRIEVE RELEVANT CHUNKS
@@ -175,6 +256,12 @@ class IkrambotRAG:
             top_k
         )
 
+        relevance_threshold = max(
+            similarity_threshold,
+            0.30,
+            float(scores[0][0]) * 0.85
+        )
+
         # ----------------------------------------------
         # 5. COLLECT RELEVANT RESULTS
         # ----------------------------------------------
@@ -185,11 +272,9 @@ class IkrambotRAG:
             scores[0],
             indices[0]
         ):
-
             score = float(score)
 
-            # Ignore results below threshold
-            if score < similarity_threshold:
+            if score < relevance_threshold:
                 continue
 
             results.append(
@@ -199,6 +284,20 @@ class IkrambotRAG:
                     "metadata": self.metadata[index_id]
                 }
             )
+
+        question_keywords = get_query_keywords(question)
+        if question_keywords and results:
+            relevant_results = [
+                result
+                for result in results
+                if len(
+                    question_keywords
+                    & get_query_keywords(result["text"])
+                )
+                >= (len(question_keywords) + 1) // 2
+            ]
+            if relevant_results:
+                results = relevant_results
 
         return results
 
@@ -219,7 +318,7 @@ class IkrambotRAG:
 
         for result in results:
 
-            source = result["metadata"]["source"]
+            source = format_source_reference(result)
 
             text = result["text"]
 
@@ -283,7 +382,7 @@ class IkrambotRAG:
             question,
             history=history,
             top_k=top_k,
-            similarity_threshold=0.25
+            similarity_threshold=0.30
         )
 
         # ----------------------------------------------
@@ -327,7 +426,7 @@ class IkrambotRAG:
 
         for result in results:
 
-            source = result["metadata"]["source"]
+            source = format_source_reference(result)
 
             if source not in sources:
 
