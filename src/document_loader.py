@@ -2,7 +2,7 @@ from pathlib import Path
 from pypdf import PdfReader
 
 
-DATA_DIR = Path("data")
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 def load_pdf(file_path):

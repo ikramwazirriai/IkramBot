@@ -3,6 +3,10 @@ from preprocessing import clean_text
 from chunking import split_text
 from embeddings import load_embedding_model, create_embeddings
 from vector_store import create_faiss_index
+from pathlib import Path
+
+
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 
 def main():
@@ -97,19 +101,20 @@ def main():
     import os
     import pickle
 
-    os.makedirs("vectorstore", exist_ok=True)
+    vectorstore_dir = PROJECT_DIR / "vectorstore"
+    os.makedirs(vectorstore_dir, exist_ok=True)
 
     # Save FAISS index
     import faiss
 
     faiss.write_index(
         index,
-        "vectorstore/ikram.index"
+        str(vectorstore_dir / "ikram.index")
     )
 
     # Save chunks and metadata
     with open(
-        "vectorstore/metadata.pkl",
+        vectorstore_dir / "metadata.pkl",
         "wb"
     ) as file:
 

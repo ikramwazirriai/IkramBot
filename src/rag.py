@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import faiss
 import pickle
 
@@ -10,8 +12,9 @@ from llm import generate_answer
 # FILE PATHS
 # ==================================================
 
-INDEX_PATH = "vectorstore/ikram.index"
-METADATA_PATH = "vectorstore/metadata.pkl"
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+INDEX_PATH = PROJECT_DIR / "vectorstore" / "ikram.index"
+METADATA_PATH = PROJECT_DIR / "vectorstore" / "metadata.pkl"
 
 
 # ==================================================
